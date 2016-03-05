@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Checked complexity with typed simplicity</title>
+    <meta charset="utf-8">
+    <style>
+      @import url(https://fonts.googleapis.com/css?family=Open+Sans:400,700,400italic);
+      @import url(https://fonts.googleapis.com/css?family=Anonymous+Pro:400,700,400italic);
+
+      body { font-family: 'Open Sans'; }
+      h1, h2, h3 {
+        font-family: 'Open Sans';
+        font-weight: normal;
+      }
+      .remark-code, .remark-inline-code { font-family: 'Anonymous Pro'; }
+    </style>
+  </head>
+  <body>
+    <textarea id="source">
+
+class: center, middle
+
+# Checked complexity with typed simplicity
+### Adelbert Chang
+#### Box, Inc.
+
+---
+
+class: center, middle
+
+## When it comes to controlling the complexity of developing and, more importantly, maintaining a large system, the only game in town is modularity.
+
+#### "Modules Matter Most" *Robert Harper*
+
+---
+
+class: center, middle
+
+# Code/concept reuse
+
+---
+
+class: center, middle
+
+## A type system is a syntactic method for enforcing levels of abstraction in programs.
+
+#### "Types and Programming Languages" *Benjamin C. Pierce*
+
+---
+
+class: center, middle
+
+*These slides were compiled with Scala 2.11.7, Cats 0.4.1, and Kind-projector 0.7.1 using tut 0.4.2.*
+
+---
+
+### Functions as values
+
+```tut:silent
+def doubleInts(ints: List[Int]): List[Int] = ints match {
+  case Nil => Nil
+  case h :: t => (h * 2) :: doubleInts(t)
+}
+```
+
+--
+
+```tut:silent
+def add50(ints: List[Int]): List[Int] = ints match {
+  case Nil => Nil
+  case h :: t => (h + 50) :: add50(t)
+}
+```
+
+--
+
+```tut:silent
+def mapInts(ints: List[Int])(f: Int => Int): List[Int] = ints match {
+  case Nil => Nil
+  case h :: t => f(h) :: mapInts(t)(f)
+}
+```
+
+---
+
+## Type parameters
+
+```tut:silent
+def listStringConcat(left: List[String], right: List[String]): List[String] =
+  left match {
+    case Nil => right
+    case h :: t => h :: listStringConcat(t, right)
+  }
+```
+
+--
+
+```tut:silent
+def listIntConcat(left: List[Int], right: List[Int]): List[Int] =
+  left match {
+    case Nil => right
+    case h :: t => h :: listIntConcat(t, right)
+  }
+```
+
+--
+
+- Abstract out irrelevant information
+
+--
+
+```tut:silent
+def concat[A](left: List[A], right: List[A]): List[A] =
+  left match {
+    case Nil => right
+    case h :: t => h :: concat(t, right)
+  }
+```
+
+--
+
+```tut:silent
+concat(List(1, 2)        , List(3, 4, 5))
+concat(List("hello", " "), List("world"))
+concat(List('a', 'b')    , List('c'))
+```
+
+---
+
+### Functions as values + type parameters
+
+```tut:silent
+def foldRight[A, B](as: List[A], b: B)(f: (A, B) => B): B =
+  as match {
+    case Nil => b
+    case h :: t => f(h, foldRight(t, b)(f))
+  }
+```
+
+--
+
+```tut:silent
+def size[A](as: List[A]): Int =
+  foldRight(as, 0)((_, sz) => sz + 1)
+
+def map[A, B](as: List[A])(f: A => B): List[B] =
+  foldRight(as, List.empty[B])((a, bs) => f(a) :: bs)
+
+def concat[A](left: List[A], right: List[A]): List[A] =
+  foldRight(left, right)(_ :: _)
+
+def flatten[A](aas: List[List[A]]): List[A] =
+  aas match {
+    case Nil => Nil
+    case as :: t => concat(as, flatten(t))
+  }
+
+def flatMap[A, B](as: List[A])(f: A => List[B]): List[B] =
+  flatten(map(as)(f))
+```
+
+
+---
+
+### Type parameters, universal quantification
+
+--
+
+- For all (∀) A. Given a term of type A, I can produce a term of type A
+
+```tut:silent
+trait ForAll {
+  def apply[A](a: A): A = a
+}
+```
+--
+
+- **You** may choose **any** A
+
+```tut:silent
+def forAllInt(f: ForAll): Int => Int =
+  i => f(i)
+```
+
+---
+
+### Type members, existential quantification
+
+--
+
+- There exists (∃) an A such that given a term of type A, I can produce a term of type A
+
+```tut:silent
+trait ThereExists {
+  type A
+
+  def apply(a: A): A
+}
+```
+
+--
+
+- **I** choose **an** A
+
+```tut:fail:book
+def thereExistsInt(e: ThereExists): Int => Int =
+  i => e(i)
+```
+
+---
+
+class: center, middle
+
+### Type Members vs. Type Parameters (Hi Jon!)
+
+#### Type parameters = universal quantification = abstraction
+
+#### (Abstract) Type members = existential quantification = information hiding
+
+---
+
+### Type Members vs. Type Parameters: Example
+
+```tut:silent
+// Universally quantified A - known to you
+trait Stack[A] {
+  // Existentially quantified Repr - known to me
+  type Repr
+
+  def empty: Repr
+
+  def push(a: A, r: Repr): Repr
+
+  def pop(r: Repr): Option[(A, Repr)]
+}
+```
+
+--
+
+```tut:silent
+def push123(stack: Stack[Int]): stack.Repr = {
+  import stack._
+  push(3, push(2, push(1, empty)))
+}
+```
+
+--
+
+```tut:fail:book
+// I bet the Stack is a List
+def push123List(stack: Stack[Int]) =
+  stack.push(1, List(2, 3, 4))
+```
+
+---
+
+## Kinds
+
+- The "type" of types
+
+--
+
+- Types are to Values as Kinds are to Types
+
+--
+
+- `*`
+  - Int
+  - Char
+  - List[Int]
+  - Either[String, Int]
+
+--
+
+- `* -> *`
+  - List
+  - Vector
+  - Future
+
+--
+
+- `(*, *) -> *`
+  - Either
+  - Tuple2
+
+---
+
+## Higher-kinded types
+
+- Types that abstract over type constructors
+
+- "Generics of a Higher Kind" Adrian Moors, Frank Piessens, Martin Odersky
+
+--
+
+```tut:silent
+// (* -> *) -> *
+trait Functor[F[_]] {
+  def map[A, B](fa: F[A])(f: A => B): F[B]
+}
+
+trait Applicative[F[_]] extends Functor[F] {
+  def map2[A, B, C](fa: F[A], fb: F[B])(f: (A, B) => C): F[C]
+  def pure[A](a: A): F[A]
+
+  def map[A, B](fa: F[A])(f: A => B): F[B] =
+    map2(fa, pure(()))((a, _) => f(a))
+}
+```
+
+--
+
+```tut:silent
+val listFunctor: Functor[List] = new Functor[List] {
+  def map[A, B](fa: List[A])(f: A => B): List[B] = fa match {
+    case Nil => Nil
+    case h :: t => f(h) :: map(t)(f)
+  }
+}
+```
+
+---
+
+```tut:silent:reset
+import cats.Applicative
+
+def traverseList[G[_], A, B](as: List[A])(f: A => G[B])
+  (implicit G: Applicative[G]): G[List[B]] =
+
+  as.foldRight(G.pure(List.empty[B])) { (a, bs) =>
+    G.map2(f(a), bs)((h, t) => h :: t)
+  }
+```
+
+--
+
+
+```tut:silent
+import cats.implicits._
+import scala.concurrent.Future
+import scala.concurrent.ExecutionContext.Implicits.global
+
+def parseIntOption(s: String): Option[Int] =
+  if (s.matches("-?[0-9]+")) Some(s.toInt) else None
+```
+
+
+```tut:book
+traverseList(List("1", "2", "3"))(parseIntOption)
+traverseList(List("hello", "1", "world"))(parseIntOption)
+```
+
+--
+
+```tut:book
+traverseList(List("hello", "world"))(s => Future(s ++ s))
+```
+
+--
+
+```tut:book
+traverseList(List('a', 'b', 'c'))(c => List(c, c, c))
+```
+
+---
+
+## Embedded DSLs
+
+![SICP](sicp.jpg)
+
+---
+
+## Embedded DSLs
+
+- Build an AST of your DSL
+
+--
+
+- Separate **structure** from **interpretation**
+
+--
+
+- A program inside your program
+
+--
+
+- Pass AST around in your program, avoiding interpretation until the end
+
+--
+
+- Free monad, free applicative, finally tagless
+
+---
+
+
+```tut:silent
+import cats.Monad
+
+/** The interpreter */
+abstract class RWInterp[F[_]] {
+  def F: Monad[F]
+  def read: F[String]
+  def write(s: String): F[Unit]
+}
+```
+
+--
+
+```tut:silent
+/** The structure/AST */
+sealed abstract class RW[A] {
+  def run[F[_]](interp: RWInterp[F]): F[A]
+}
+
+implicit val consoleMonad: Monad[RW] = new Monad[RW] {
+  def flatMap[A, B](fa: RW[A])(f: A => RW[B]): RW[B] =
+    new RW[B] {
+      def run[F[_]](interp: RWInterp[F]): F[B] =
+        interp.F.flatMap(fa.run(interp))(a => f(a).run(interp))
+    }
+
+  def pure[A](a: A): RW[A] =
+    new RW[A] {
+      def run[F[_]](interp: RWInterp[F]): F[A] =
+        interp.F.pure(a)
+    }
+}
+```
+
+---
+
+```tut:silent
+val read: RW[String] =
+  new RW[String] {
+    def run[F[_]](interp: RWInterp[F]): F[String] =
+      interp.read
+  }
+
+def write(s: String): RW[Unit] =
+  new RW[Unit] {
+    def run[F[_]](interp: RWInterp[F]): F[Unit] =
+      interp.write(s)
+  }
+```
+
+--
+
+```tut:book
+val prog =
+  for {
+    x <- read
+    y <- read
+    _ <- write(x ++ y)
+  } yield ()
+```
+
+---
+
+```tut:silent
+import cats.Id
+import scala.io.StdIn
+```
+
+```tut:book
+/** An interpreter that uses console IO */
+val stdioInterp = new RWInterp[Id] {
+  val F = implicitly[Monad[Id]]
+  def read: String = StdIn.readLine()
+  def write(s: String): Unit = println(s)
+}
+
+def go(): Unit = prog.run(stdioInterp)
+```
+
+---
+
+```tut:silent
+import cats.data.State
+```
+
+
+```tut:book
+case class RWState(in: List[String], out: List[String]) {
+  def read: (RWState, String) = (copy(in = in.tail), in.head) // YOLO
+  def write(s: String): (RWState, Unit) = (copy(out = s :: out), ())
+}
+
+/** An interpreter that uses the State monad */
+val stateInterp = new RWInterp[State[RWState, ?]] {
+  val F = implicitly[Monad[State[RWState, ?]]]
+  val read: State[RWState, String] = State(_.read)
+  def write(s: String): State[RWState, Unit] =
+    State(cs => cs.write(s))
+}
+```
+
+--
+
+```tut:book
+val cs = RWState(List("hello ", "nescala", "not read"), List.empty)
+
+val state = prog.run[State[RWState, ?]](stateInterp)
+val runState = state.runS(cs).value
+```
+
+---
+
+## Summary
+
+- Functions allow reuse of computation
+
+--
+
+- Functions as values allow for highly generic combinators
+
+--
+
+- Type parameters abstract away unnecessary details
+
+--
+
+- Abstract type members enforce hiding of irrelevant detail
+
+--
+
+- Higher-kinds allow for higher order abstraction
+
+--
+
+- EDSLs separate structure from interpretation, allowing the same
+  structure to be run against multiple interpreters
+
+--
+
+- Learn more:
+  - "On understanding types, data abstraction, and polymorphism" Luca Cardelli, Peter Wenger
+  - "On understanding data abstraction, revisited" William R. Cook
+  - "Type Classes vs. the World" Edward Kmett
+
+---
+class: center, middle
+
+# EOF
+
+
+    </textarea>
+    <script src="https://gnab.github.io/remark/downloads/remark-latest.min.js">
+    </script>
+    <script>
+      var slideshow = remark.create({
+        countIncrementalSlides: false
+      });
+    </script>
+  </body>
+</html>
